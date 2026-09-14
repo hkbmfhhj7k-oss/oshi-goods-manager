@@ -131,13 +131,80 @@ function setAutoField(id,value,opts={}){const el=$(id);if(!el||value===undefined
 function confidenceClass(v){const n=Number(v||0);return n>=.8?"high":n>=.5?"mid":"low";}
 function renderAiCandidates(data){const labels=[["series","シリーズ"],["title","タイトル"],["price","価格"],["releaseDate","発売日"],["shop","ショップ"],["shippingText","発送予定"],["variantCount","全種数"],["purchaseLimit","購入上限"],["bonusText","特典"]],conf=data.confidence||{};const rows=labels.filter(([k])=>data[k]!==""&&data[k]!==null&&data[k]!==undefined).map(([k,l])=>{let v=data[k];if(k==="price")v=fmt(v);const c=conf[k]??conf.title??.7;return `<div class="candidate-row"><span class="k">${esc(l)}</span><span class="v">${esc(String(v))}</span><i class="conf-dot ${confidenceClass(c)}"></i></div>`}).join("");$("aiCandidateList").innerHTML=rows||'<div class="small-muted">確実に拾えた項目はありませんでした。</div>';$("aiCandidate").classList.remove("hidden");}
 function loadImage(dataUrl){return new Promise((resolve,reject)=>{const img=new Image();img.onload=()=>resolve(img);img.onerror=reject;img.src=dataUrl;});}
-async function resizeForAnalysis(dataUrl){const img=await loadImage(dataUrl),maxW=1600,maxH=12000,scale=Math.min(1,maxW/img.width,maxH/img.height),w=Math.max(1,Math.round(img.width*scale)),h=Math.max(1,Math.round(img.height*scale)),c=document.createElement("canvas");c.width=w;c.height=h;c.getContext("2d").drawImage(img,0,0,w,h);return c.toDataURL("image/jpeg",.88);}
-function normalizeBox(box){if(!box)return null;const x=Number(box.x),y=Number(box.y),w=Number(box.width),h=Number(box.height);if(![x,y,w,h].every(Number.isFinite)||w<=0||h<=0)return null;return{x:Math.max(0,Math.min(1,x)),y:Math.max(0,Math.min(1,y)),width:Math.max(.02,Math.min(1,w)),height:Math.max(.02,Math.min(1,h))};}
+async function makeAnalysisChunk(dataUrl,startY=0,heightPx=null,maxW=1600){
+  const img=await loadImage(dataUrl);
+  const sy=Math.max(0,Math.min(img.height-1,Math.round(startY)));
+  const sh=Math.max(1,Math.min(img.height-sy,Math.round(heightPx??(img.height-sy))));
+  const scale=Math.min(1,maxW/img.width);
+  const c=document.createElement("canvas");
+  c.width=Math.max(1,Math.round(img.width*scale));
+  c.height=Math.max(1,Math.round(sh*scale));
+  c.getContext("2d").drawImage(img,0,sy,img.width,sh,0,0,c.width,c.height);
+  return{image:c.toDataURL("image/jpeg",.9),startY:sy,height:sh,fullWidth:img.width,fullHeight:img.height};
+}
+async function buildAnalysisChunks(dataUrl){
+  const img=await loadImage(dataUrl),ratio=img.height/img.width;
+  if(ratio<=3){
+    return{top:await makeAnalysisChunk(dataUrl,0,img.height),details:[],isFullPage:false};
+  }
+  const topH=Math.min(img.height,Math.round(img.width*2.45));
+  const detailH=Math.round(img.width*3.15);
+  const step=Math.round(img.width*2.75);
+  const maxScanY=Math.min(img.height,Math.round(img.width*8.5));
+  const details=[];
+  for(let y=Math.max(0,topH-Math.round(img.width*.35));y<maxScanY&&details.length<3;y+=step){
+    details.push(await makeAnalysisChunk(dataUrl,y,Math.min(detailH,img.height-y)));
+  }
+  return{top:await makeAnalysisChunk(dataUrl,0,topH),details,isFullPage:true};
+}
+function normalizeBox(box){if(!box)return null;const x=Number(box.x),y=Number(box.y),w=Number(box.width),h=Number(box.height);if(![x,y,w,h].every(Number.isFinite)||w<=0||h<=0)return null;return{x:Math.max(0,Math.min(1,x)),y:Math.max(0,Math.min(1,y)),width:Math.max(.01,Math.min(1,w)),height:Math.max(.01,Math.min(1,h))};}
 async function compressStoredImage(dataUrl){const img=await loadImage(dataUrl),max=1200,scale=Math.min(1,max/img.width,max/img.height),c=document.createElement("canvas");c.width=Math.max(1,Math.round(img.width*scale));c.height=Math.max(1,Math.round(img.height*scale));c.getContext("2d").drawImage(img,0,0,c.width,c.height);return c.toDataURL("image/jpeg",.82);}
-async function cropProductImage(src,box){const b=normalizeBox(box);if(!b)return compressStoredImage(src);const img=await loadImage(src);let sx=Math.round(b.x*img.width),sy=Math.round(b.y*img.height),sw=Math.round(b.width*img.width),sh=Math.round(b.height*img.height);sw=Math.min(sw,img.width-sx);sh=Math.min(sh,img.height-sy);if(sw<40||sh<40)return compressStoredImage(src);const px=Math.round(sw*.025),py=Math.round(sh*.025);sx=Math.max(0,sx-px);sy=Math.max(0,sy-py);sw=Math.min(img.width-sx,sw+px*2);sh=Math.min(img.height-sy,sh+py*2);const max=1200,scale=Math.min(1,max/sw,max/sh),c=document.createElement("canvas");c.width=Math.max(1,Math.round(sw*scale));c.height=Math.max(1,Math.round(sh*scale));c.getContext("2d").drawImage(img,sx,sy,sw,sh,0,0,c.width,c.height);return c.toDataURL("image/jpeg",.84);}
+async function cropProductImage(src,box){const b=normalizeBox(box);if(!b)return"";const area=b.width*b.height;if(b.width<.15||b.height<.08||area<.025||area>.82)return"";const img=await loadImage(src);let sx=Math.round(b.x*img.width),sy=Math.round(b.y*img.height),sw=Math.round(b.width*img.width),sh=Math.round(b.height*img.height);sw=Math.min(sw,img.width-sx);sh=Math.min(sh,img.height-sy);if(sw<80||sh<80)return"";const px=Math.round(sw*.015),py=Math.round(sh*.015);sx=Math.max(0,sx-px);sy=Math.max(0,sy-py);sw=Math.min(img.width-sx,sw+px*2);sh=Math.min(img.height-sy,sh+py*2);const max=1200,scale=Math.min(1,max/sw,max/sh),c=document.createElement("canvas");c.width=Math.max(1,Math.round(sw*scale));c.height=Math.max(1,Math.round(sh*scale));c.getContext("2d").drawImage(img,sx,sy,sw,sh,0,0,c.width,c.height);return c.toDataURL("image/jpeg",.86);}
 function showPreview(data,source=false){if(!data)return;$("imagePreview").src=data;$("imagePreview").classList.remove("hidden");$("imagePlaceholder").classList.add("hidden");$("imagePreview").closest(".image-picker")?.classList.toggle("source-mode",source);showingSourceImage=source;if($("toggleSourceBtn"))$("toggleSourceBtn").textContent=source?"商品画像を見る":"元スクショを見る";}
+function isUsefulString(v){return typeof v==="string"&&v.trim()!=="";}
+function titleScore(v){if(!isUsefulString(v))return-999;const s=v.trim();let n=s.length;if(/Blu-?ray|ブルーレイ|DVD|CD/i.test(s))n+=6;if(/[「『【]/.test(s))n+=8;if(/通常版|限定版|特装版|初回/.test(s))n+=4;if(/^(Blu-?ray|ブルーレイ|DVD|CD|通常版)$/i.test(s))n-=100;return n;}
+function mergeAiProducts(top,details=[]){
+  const all=[top,...details].filter(Boolean),out={...top};
+  const chooseLongest=(key)=>{const vals=all.map(x=>x?.[key]).filter(isUsefulString);return vals.sort((a,b)=>String(b).length-String(a).length)[0]||"";};
+  const titles=all.map(x=>x?.title).filter(isUsefulString).sort((a,b)=>titleScore(b)-titleScore(a));
+  out.title=titles[0]||"";
+  ["series","orderStart","orderEnd","reserveDeadline","shippingText","shop","bonusText"].forEach(k=>{if(!isUsefulString(out[k]))out[k]=chooseLongest(k);});
+  ["price","variantCount","purchaseLimit","boxPrice","boxCount"].forEach(k=>{if(out[k]===null||out[k]===undefined||out[k]===""||Number(out[k])<=0){const hit=all.find(x=>Number(x?.[k])>0);out[k]=hit?hit[k]:null;}});
+  if(!isUsefulString(out.releaseDate)){const hit=all.find(x=>/^\d{4}-\d{2}-\d{2}$/.test(String(x?.releaseDate||"")));out.releaseDate=hit?.releaseDate||"";}
+  out.isRandom=all.some(x=>x?.isRandom===true);
+  out.hasBonus=all.some(x=>x?.hasBonus===true);
+  if(out.hasBonus&&!isUsefulString(out.bonusText))out.bonusText="特典あり";
+  const badShip=/^(在庫あり|在庫なし)$|在庫状況.*発送先.*地域.*異な|お届け時期.*在庫状況.*異な|店舗受け取り|店舗受取り/;
+  if(badShip.test(String(out.shippingText||"")))out.shippingText="";
+  if(Number(out.variantCount)<=0)out.variantCount=null;
+  if(Number(out.purchaseLimit)<=0)out.purchaseLimit=null;
+  if(Number(out.boxPrice)<=0)out.boxPrice=null;
+  if(Number(out.boxCount)<=0)out.boxCount=null;
+  return out;
+}
+async function callAnalyzer(image,mode="top"){
+  const res=await fetch(ANALYZER_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({image,mode})});
+  let payload;try{payload=await res.json();}catch{throw new Error(`解析サーバーの応答を読めませんでした (${res.status})`)}
+  if(!res.ok||!payload?.ok)throw new Error(payload?.error||`解析に失敗しました (${res.status})`);
+  return payload.product||{};
+}
 function applyAiFields(data){clearAutoFillMarks();const filled=[],map=[["title",data.title,"タイトル"],["series",data.series,"シリーズ"],["price",data.price,"価格"],["orderStart",data.orderStart,"受注開始"],["orderEnd",data.orderEnd,"受注終了"],["reserveDeadline",data.reserveDeadline,"予約締切"],["releaseDate",data.releaseDate,"発売日"],["shippingText",data.shippingText,"発送予定"],["shop",data.shop,"ショップ"],["variantCount",data.variantCount,"全種数"],["purchaseLimit",data.purchaseLimit,"購入上限"],["boxPrice",data.boxPrice,"BOX価格"],["boxCount",data.boxCount,"BOX封入数"]];map.forEach(([id,v,l])=>{if(setAutoField(id,v))filled.push(l)});if(data.isRandom){$("isRandom").checked=true;toggleSections();}if(data.hasBonus){$("hasBonus").checked=true;toggleSections();if(!document.querySelector(".bonus-row")&&data.bonusText){addBonusRow({name:data.bonusText,condition:data.shop||""});filled.push("特典");}}updateProbability();renderAiCandidates(data);$("aiResultSummary").innerHTML=filled.length?`<b>${filled.length}項目を仮入力しました。</b><br>薄紫の欄だけざっと確認すればOKです。`:`商品情報は読み取れましたが、自動入力できる項目が少なめでした。`;}
-async function runAiAnalysis(){if(!sourceScanData||aiRunning)return;const status=$("aiStatus"),icon=$("aiStateIcon"),bar=$("aiProgressBar");$("aiPanel").classList.remove("hidden");aiRunning=true;status.classList.remove("ocr-error");status.classList.add("ai-working");status.textContent="商品ページを読んでいます…";icon.textContent="AI";bar.style.width="18%";$("aiResultSummary").textContent="タイトル・価格・発売日・特典・商品画像などを探しています。";$("aiCandidate").classList.add("hidden");try{const image=await resizeForAnalysis(sourceScanData);bar.style.width="42%";const res=await fetch(ANALYZER_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({image})});let payload;try{payload=await res.json();}catch{throw new Error(`解析サーバーの応答を読めませんでした (${res.status})`)}if(!res.ok||!payload?.ok)throw new Error(payload?.error||`解析に失敗しました (${res.status})`);bar.style.width="74%";const data=payload.product||{};applyAiFields(data);try{productImageData=await cropProductImage(sourceScanData,data.mainImage);}catch{productImageData=await compressStoredImage(sourceScanData);}editingImageData=productImageData;showPreview(productImageData,false);$("toggleSourceBtn").classList.remove("hidden");bar.style.width="100%";status.textContent="読み取り完了";status.classList.remove("ai-working");icon.textContent="✓";}catch(err){console.error(err);status.textContent="読み取りに失敗しました";status.classList.remove("ai-working");status.classList.add("ocr-error");icon.textContent="!";bar.style.width="100%";$("aiResultSummary").textContent=`${err.message||err}。画像だけでも保存できます。`;try{productImageData=await compressStoredImage(sourceScanData);editingImageData=productImageData;}catch{}}finally{aiRunning=false;}}
+async function runAiAnalysis(){if(!sourceScanData||aiRunning)return;const status=$("aiStatus"),icon=$("aiStateIcon"),bar=$("aiProgressBar");$("aiPanel").classList.remove("hidden");aiRunning=true;status.classList.remove("ocr-error");status.classList.add("ai-working");status.textContent="商品ページを読んでいます…";icon.textContent="AI";bar.style.width="10%";$("aiResultSummary").textContent="フルページなら上部と詳細を分けて読み取ります。";$("aiCandidate").classList.add("hidden");try{
+  const chunks=await buildAnalysisChunks(sourceScanData);bar.style.width="22%";
+  const topData=await callAnalyzer(chunks.top.image,"top");bar.style.width=chunks.details.length?"45%":"72%";
+  const detailData=[];
+  for(let i=0;i<chunks.details.length;i++){
+    try{detailData.push(await callAnalyzer(chunks.details[i].image,"detail"));}catch(err){console.warn("detail chunk failed",i,err);}
+    bar.style.width=`${45+Math.round(((i+1)/Math.max(1,chunks.details.length))*27)}%`;
+  }
+  const data=mergeAiProducts(topData,detailData);applyAiFields(data);bar.style.width="82%";
+  const conf=Number(topData?.confidence?.mainImage||0);
+  let cropped="";
+  if(conf>=.5)try{cropped=await cropProductImage(chunks.top.image,topData.mainImage);}catch{}
+  if(cropped){productImageData=cropped;editingImageData=cropped;showPreview(cropped,false);$("toggleSourceBtn").classList.remove("hidden");}
+  else{productImageData="";editingImageData="";showPreview(sourceScanData,true);$("toggleSourceBtn").classList.add("hidden");$("aiResultSummary").innerHTML+=`<br><span class="small-muted">商品画像の切り抜きだけ確信が持てなかったので、元スクショを表示しています。</span>`;}
+  bar.style.width="100%";status.textContent=chunks.isFullPage?"読み取り完了（分割解析）":"読み取り完了";status.classList.remove("ai-working");icon.textContent="✓";
+}catch(err){console.error(err);status.textContent="読み取りに失敗しました";status.classList.remove("ai-working");status.classList.add("ocr-error");icon.textContent="!";bar.style.width="100%";$("aiResultSummary").textContent=`${err.message||err}。元スクショはそのまま確認できます。`;productImageData="";editingImageData="";showPreview(sourceScanData,true);}finally{aiRunning=false;}}
 
 function resetForm(){
   $("productForm").reset(); $("productId").value=""; editingImageData="";
