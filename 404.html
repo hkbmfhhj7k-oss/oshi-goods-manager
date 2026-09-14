@@ -13,10 +13,14 @@
     <header class="topbar">
       <div>
         <p class="eyebrow">MY OSHI GOODS</p>
-        <h1>推し活グッズ管理</h1>
+        <h1>推し活ノート</h1>
       </div>
       <button class="icon-btn" id="settingsBtn" aria-label="設定">⚙️</button>
     </header>
+
+    <section class="cute-hero"><div><span class="cute-kicker">MY OSHI LOG</span><h2>今日も推し活、いい感じ。</h2><p>気になるものは、とりあえず入れておこ。</p></div><div class="cute-sparkle">✦</div></section>
+
+    <section class="quick-actions"><button id="quickConsidering" class="quick-card">♡<span>検討中</span></button><button id="quickWaiting" class="quick-card">⌛<span>発送待ち</span></button><button id="quickMoney" class="quick-card">¥<span>今月</span></button></section>
 
     <main>
       <section class="summary-grid">
@@ -69,7 +73,7 @@
       </section>
     </main>
 
-    <button class="fab" id="addBtn" aria-label="商品を追加">＋</button>
+    <button class="fab" id="addBtn" aria-label="商品を追加"><span>＋</span></button>
 
     <nav class="bottom-nav">
       <button class="nav-item active" data-view="home">🏠<span>ホーム</span></button>
@@ -90,11 +94,36 @@
       <div class="sheet-content">
         <input type="hidden" id="productId" />
 
-        <label class="image-picker">
-          <input id="imageInput" type="file" accept="image/*" />
-          <img id="imagePreview" alt="" class="hidden" />
-          <div id="imagePlaceholder"><span>📷</span><b>画像を追加</b></div>
-        </label>
+        <section class="scan-card">
+          <div class="scan-head">
+            <div>
+              <span class="scan-kicker">PHOTO → AUTO FILL</span>
+              <h3>まず画像を入れるだけ</h3>
+              <p>スクショや告知画像から、読める項目を自動で埋めます。</p>
+            </div>
+            <span class="scan-spark">✦</span>
+          </div>
+
+          <label class="image-picker">
+            <input id="imageInput" type="file" accept="image/*" />
+            <img id="imagePreview" alt="" class="hidden" />
+            <div id="imagePlaceholder"><span>📷</span><b>画像・スクショを選ぶ</b><small>選ぶと自動で文字を読み取ります</small></div>
+          </label>
+
+          <div id="ocrPanel" class="ocr-panel hidden">
+            <div class="ocr-status-row">
+              <span id="ocrStatus">待機中</span>
+              <strong id="ocrPercent"></strong>
+            </div>
+            <div class="ocr-progress"><i id="ocrProgressBar"></i></div>
+            <div id="ocrResultSummary" class="ocr-result-summary"></div>
+            <div class="ocr-actions">
+              <button type="button" class="secondary-mini" id="rerunOcrBtn">もう一度読み取る</button>
+              <button type="button" class="secondary-mini" id="showOcrTextBtn">読み取った文字</button>
+            </div>
+            <textarea id="ocrRawText" class="ocr-raw hidden" rows="8" readonly></textarea>
+          </div>
+        </section>
 
         <div class="field-grid two">
           <label>シリーズ
@@ -114,7 +143,7 @@
         </div>
 
         <label>タイトル
-          <input id="title" required placeholder="商品名" />
+          <input id="title" placeholder="空欄でも保存OK（画像だけ登録できます）" />
         </label>
 
         <div class="field-grid two">
@@ -267,6 +296,7 @@
     </div>
   </template>
 
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

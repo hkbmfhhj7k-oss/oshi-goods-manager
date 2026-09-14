@@ -2,6 +2,9 @@ const STORAGE_KEY = "oshiGoodsManager.v1";
 let state = { products: [], view: "home", listFilter: "all", statusFilter: null, search: "", sort: "updated" };
 let editingImageData = "";
 let currentDetailId = null;
+let lastOcrText = "";
+let lastOcrImageData = "";
+let ocrRunning = false;
 
 const $ = (id) => document.getElementById(id);
 const fmt = n => new Intl.NumberFormat("ja-JP",{style:"currency",currency:"JPY",maximumFractionDigits:0}).format(Number(n||0));
@@ -90,7 +93,7 @@ function renderProducts(){
       ${img}
       <div>
         <div class="series">${esc(p.series||"未分類")}</div>
-        <h3>${esc(p.title)}</h3>
+        <h3>${esc(p.title||"タイトル未設定")}</h3>
         <div class="price">${fmt(p.price)}</div>
         <div class="meta-row"><span class="badge">${statusLabel[p.status]||p.status}</span>${owned}${ship}</div>
       </div>
@@ -119,8 +122,224 @@ function setNav(){
   document.querySelectorAll(".nav-item").forEach(b=>b.classList.toggle("active",b.dataset.view===state.view));
 }
 
+
+const OCR_FIELD_IDS = [
+  "series","title","price","orderStart","orderEnd","reserveDeadline","releaseDate",
+  "shippingText","variantCount","purchaseLimit","boxPrice","boxCount"
+];
+
+function clearAutoFillMarks(){
+  OCR_FIELD_IDS.forEach(id=>$(id)?.classList.remove("autofilled"));
+}
+
+function setAutoField(id, value, opts={}){
+  const el=$(id);
+  if(!el || value===undefined || value===null || value==="") return false;
+  if(!opts.overwrite && String(el.value||"").trim()!=="") return false;
+  el.value=value;
+  el.classList.add("autofilled");
+  return true;
+}
+
+function normalizeOcrText(text){
+  return String(text||"")
+    .replace(/[，、]/g,",")
+    .replace(/[‐‑‒–—―]/g,"-")
+    .replace(/[〜～]/g,"~")
+    .replace(/[￥]/g,"¥")
+    .replace(/[ \t]+/g," ")
+    .replace(/\n{3,}/g,"\n\n");
+}
+
+function toISODate(y,m,d){
+  const now=new Date();
+  y=Number(y||now.getFullYear()); m=Number(m); d=Number(d);
+  if(!m||!d||m<1||m>12||d<1||d>31) return "";
+  return `${String(y).padStart(4,"0")}-${String(m).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+}
+
+function parseDateToken(s, fallbackYear){
+  if(!s) return "";
+  const t=String(s).replace(/\s/g,"");
+  let m=t.match(/(?:(20\d{2})[年\/.\-])?(\d{1,2})[月\/.\-](\d{1,2})日?/);
+  if(!m) return "";
+  return toISODate(m[1]||fallbackYear, m[2], m[3]);
+}
+
+function chooseLikelyTitle(lines){
+  const productWords = /(アクリル|アクスタ|缶バッジ|バッジ|キーホルダー|キーチェーン|カード|ブロマイド|ステッカー|クリアファイル|ぬい|マスコット|フィギュア|ポスター|タオル|チャーム|コースター|トレーディング|ランダム|グッズ|セット|BOX)/i;
+  const noise = /(税込|価格|円|予約|受注|発売|発送|お届け|全\d+種|お一人|購入制限|特典|注意|©|http|www\.)/i;
+  const candidates=lines.filter(x=>x.length>=3 && x.length<=70 && !noise.test(x));
+  const hit=candidates.find(x=>productWords.test(x));
+  if(hit) return hit;
+  return candidates.sort((a,b)=>b.length-a.length)[0]||"";
+}
+
+function chooseLikelySeries(lines, title){
+  const joined=lines.join(" ");
+  let m=joined.match(/(?:TVアニメ|アニメ|劇場版|コミック|漫画|ゲーム)?\s*[『「](.{2,35}?)[』」]/);
+  if(m) return m[1].trim();
+  const candidates=lines.filter(x=>x!==title && x.length>=2 && x.length<=35)
+    .filter(x=>!/(税込|円|予約|受注|発売|発送|お届け|全\d+種|お一人|特典|アクリル|缶バッジ|カード|BOX)/i.test(x));
+  return candidates[0]||"";
+}
+
+function extractOcrFields(raw){
+  const text=normalizeOcrText(raw);
+  const lines=text.split(/\n+/).map(x=>x.trim()).filter(Boolean);
+  const out={};
+
+  // Title / series
+  out.title=chooseLikelyTitle(lines);
+  out.series=chooseLikelySeries(lines,out.title);
+
+  // Price: prefer lines explicitly containing price/税込; otherwise first yen amount.
+  let priceLine=lines.find(x=>/(価格|税込|販売価格|単品)/.test(x) && /(?:¥|￥)?\s*[\d,]{3,}\s*円?/.test(x));
+  if(!priceLine) priceLine=lines.find(x=>/(?:¥|￥)\s*[\d,]{3,}|[\d,]{3,}\s*円/.test(x) && !/BOX/i.test(x));
+  if(priceLine){
+    const pm=priceLine.match(/(?:¥|￥)?\s*([\d,]{3,})\s*円?/);
+    if(pm) out.price=Number(pm[1].replace(/,/g,""));
+  }
+
+  // BOX price
+  const boxLine=lines.find(x=>/BOX|ボックス/i.test(x) && /(?:¥|￥)?\s*[\d,]{3,}\s*円?/.test(x));
+  if(boxLine){
+    const bm=boxLine.match(/(?:¥|￥)?\s*([\d,]{3,})\s*円?/);
+    if(bm) out.boxPrice=Number(bm[1].replace(/,/g,""));
+    const bc=boxLine.match(/(?:1\s*)?(?:BOX|ボックス).*?(\d{1,3})\s*(?:個|パック|枚|点)\s*(?:入|入り)?/i);
+    if(bc) out.boxCount=Number(bc[1]);
+  }
+
+  // Total variants
+  const vm=text.match(/全\s*(\d{1,3})\s*種/);
+  if(vm) out.variantCount=Number(vm[1]);
+
+  // Purchase limit
+  const limitLine=lines.find(x=>/(お一人|おひとり|1人|一人|1会計|一会計|購入.{0,4}(?:上限|まで)|まで.{0,5}(?:購入|注文))/.test(x));
+  if(limitLine){
+    const lm=limitLine.match(/(\d{1,3})\s*(?:個|点|BOX|箱|パック|枚)\s*(?:まで|迄)?/i);
+    if(lm) out.purchaseLimit=Number(lm[1]);
+  }
+
+  // Reservation / order period
+  const periodLine=lines.find(x=>/(受注|予約|受付).{0,12}(期間|開始|受付)/.test(x) && /[~〜～]/.test(x));
+  if(periodLine){
+    const year=(periodLine.match(/(20\d{2})年/)||[])[1] || new Date().getFullYear();
+    const parts=periodLine.split(/[~〜～]/);
+    out.orderStart=parseDateToken(parts[0],year);
+    out.orderEnd=parseDateToken(parts[1],year);
+  }
+
+  // Deadline
+  const deadlineLine=lines.find(x=>/(予約締切|受注締切|受付締切|受付終了|予約受付終了|受注終了)/.test(x));
+  if(deadlineLine){
+    out.reserveDeadline=parseDateToken(deadlineLine,new Date().getFullYear());
+    if(!out.orderEnd) out.orderEnd=out.reserveDeadline;
+  }
+
+  // Release date: only fill exact day. Keep vague month text in notes/summary rather than inventing a day.
+  const releaseLine=lines.find(x=>/(発売日|発売予定|発売)/.test(x));
+  if(releaseLine){
+    out.releaseDate=parseDateToken(releaseLine,new Date().getFullYear());
+    out.releaseText=releaseLine;
+  }
+
+  // Shipping text retains vague wording exactly.
+  const shipLine=lines.find(x=>/(発送予定|順次発送|お届け予定|発送時期|お届け時期|出荷予定)/.test(x));
+  if(shipLine) out.shippingText=shipLine;
+
+  // Detect random/bonus
+  out.isRandom=/(ランダム|トレーディング|全\s*\d+\s*種|ブラインド)/.test(text);
+  out.hasBonus=/(購入特典|予約特典|店舗特典|特典)/.test(text);
+
+  return out;
+}
+
+function applyOcrFields(data){
+  clearAutoFillMarks();
+  const filled=[];
+  const map=[
+    ["title",data.title,"タイトル"],["series",data.series,"シリーズ"],["price",data.price,"価格"],
+    ["orderStart",data.orderStart,"受注開始"],["orderEnd",data.orderEnd,"受注終了"],
+    ["reserveDeadline",data.reserveDeadline,"予約締切"],["releaseDate",data.releaseDate,"発売日"],
+    ["shippingText",data.shippingText,"発送予定"],["variantCount",data.variantCount,"全種数"],
+    ["purchaseLimit",data.purchaseLimit,"購入上限"],["boxPrice",data.boxPrice,"BOX価格"],["boxCount",data.boxCount,"BOX封入数"]
+  ];
+  map.forEach(([id,val,label])=>{ if(setAutoField(id,val)) filled.push(label); });
+
+  if(data.isRandom){
+    $("isRandom").checked=true; toggleSections();
+  }
+  if(data.hasBonus){
+    $("hasBonus").checked=true; toggleSections();
+  }
+  updateProbability();
+
+  // Preserve useful vague release text if exact date could not be made.
+  if(data.releaseText && !data.releaseDate){
+    const existing=$("notes").value.trim();
+    if(!existing.includes(data.releaseText)){
+      $("notes").value=(existing?existing+"\n":"")+"画像読取: "+data.releaseText;
+      $("notes").classList.add("autofilled");
+      filled.push("発売予定メモ");
+    }
+  }
+
+  const summary=$("ocrResultSummary");
+  if(filled.length){
+    summary.innerHTML=`<b>${filled.length}項目を仮入力しました。</b><br>${filled.join("・")}<br>紫色の欄だけ確認すればOKです。`;
+  }else{
+    summary.textContent="自動で項目に分けられる情報が少なかったです。読み取った文字は下から確認できます。";
+  }
+}
+
+async function runOcr(){
+  if(!editingImageData || ocrRunning) return;
+  const panel=$("ocrPanel"), status=$("ocrStatus"), pct=$("ocrPercent"), bar=$("ocrProgressBar"), summary=$("ocrResultSummary");
+  panel.classList.remove("hidden");
+  ocrRunning=true;
+  status.classList.remove("ocr-error");
+  status.textContent="文字を読み取っています…";
+  pct.textContent="0%"; bar.style.width="0%";
+  summary.textContent="初回は日本語の読み取りデータを準備するため少し時間がかかります。";
+
+  try{
+    if(typeof Tesseract==="undefined") throw new Error("OCR library unavailable");
+    const result=await Tesseract.recognize(editingImageData,"jpn+eng",{
+      logger:m=>{
+        if(typeof m.progress==="number"){
+          const p=Math.round(m.progress*100);
+          pct.textContent=`${p}%`; bar.style.width=`${p}%`;
+        }
+        if(m.status==="recognizing text") status.textContent="画像の文字を読んでいます…";
+        else if(m.status==="loading language traineddata") status.textContent="日本語データを準備中…";
+        else if(m.status==="initializing api") status.textContent="読み取りを準備中…";
+      }
+    });
+    lastOcrText=result?.data?.text||"";
+    $("ocrRawText").value=lastOcrText;
+    const fields=extractOcrFields(lastOcrText);
+    applyOcrFields(fields);
+    status.textContent="読み取り完了";
+    pct.textContent="✓"; bar.style.width="100%";
+  }catch(err){
+    console.error(err);
+    status.textContent="読み取りに失敗しました";
+    status.classList.add("ocr-error");
+    pct.textContent="";
+    summary.textContent="画像はそのまま保存できます。通信状況を確認して、必要なら「もう一度読み取る」を押してください。";
+  }finally{
+    ocrRunning=false;
+  }
+}
+
 function resetForm(){
   $("productForm").reset(); $("productId").value=""; editingImageData="";
+  lastOcrText=""; lastOcrImageData=""; clearAutoFillMarks();
+  $("notes")?.classList.remove("autofilled");
+  $("ocrPanel")?.classList.add("hidden");
+  if($("ocrRawText")) $("ocrRawText").value="";
+  if($("ocrResultSummary")) $("ocrResultSummary").textContent="";
   $("imagePreview").classList.add("hidden"); $("imagePlaceholder").classList.remove("hidden");
   $("variantEditor").innerHTML=""; $("bonusEditor").innerHTML="";
   $("randomDetails").classList.add("hidden"); $("bonusDetails").classList.add("hidden");
@@ -228,7 +447,7 @@ function openDetail(id){
       p.bonuses.map(b=>`<div class="owned-card"><b>${esc(b.name||"特典")}</b><div class="small-muted">${esc(b.condition||"")}</div><div class="small-muted">所持 ${b.owned||0} / 欲しい ${b.wanted||0}</div><div class="small-muted">譲渡 ${b.transfer||0}${b.transferTo?` → ${esc(b.transferTo)}`:""}</div></div>`).join("")
     }</div></section>`;
   }
-  $("detailContent").innerHTML=`<div class="detail-hero">${img}<div class="detail-main"><div class="series">${esc(p.series||"未分類")}</div><h2>${esc(p.title)}</h2><div class="detail-price">${fmt(p.price)}</div><div class="meta-row"><span class="badge">${statusLabel[p.status]}</span>${p.isRandom?`<span class="badge">ランダム</span>`:""}</div></div></div>
+  $("detailContent").innerHTML=`<div class="detail-hero">${img}<div class="detail-main"><div class="series">${esc(p.series||"未分類")}</div><h2>${esc(p.title||"タイトル未設定")}</h2><div class="detail-price">${fmt(p.price)}</div><div class="meta-row"><span class="badge">${statusLabel[p.status]}</span>${p.isRandom?`<span class="badge">ランダム</span>`:""}</div></div></div>
     <section class="detail-section"><h3>販売・発送</h3><dl class="kv">
       <dt>ショップ</dt><dd>${esc(p.shop||"—")}</dd><dt>受注期間</dt><dd>${p.orderStart||"—"} ～ ${p.orderEnd||"—"}</dd>
       <dt>予約締切</dt><dd>${p.reserveDeadline||"—"}</dd><dt>発売日</dt><dd>${p.releaseDate||"—"}</dd>
@@ -252,10 +471,28 @@ $("isRandom").onchange=toggleSections;$("hasBonus").onchange=toggleSections;
 ["variantCount","favCount","purchaseLimit","randomMode"].forEach(id=>$(id).addEventListener("input",updateProbability));
 $("imageInput").onchange=(e)=>{
   const f=e.target.files[0]; if(!f)return;
-  const r=new FileReader(); r.onload=()=>{editingImageData=r.result;$("imagePreview").src=r.result;$("imagePreview").classList.remove("hidden");$("imagePlaceholder").classList.add("hidden")};r.readAsDataURL(f);
+  const r=new FileReader();
+  r.onload=async()=>{
+    editingImageData=r.result;
+    lastOcrImageData=r.result;
+    $("imagePreview").src=r.result;
+    $("imagePreview").classList.remove("hidden");
+    $("imagePlaceholder").classList.add("hidden");
+    $("ocrPanel").classList.remove("hidden");
+    await runOcr();
+  };
+  r.readAsDataURL(f);
+};
+$("rerunOcrBtn").onclick=()=>runOcr();
+$("showOcrTextBtn").onclick=()=>{
+  const raw=$("ocrRawText");
+  raw.classList.toggle("hidden");
+  $("showOcrTextBtn").textContent=raw.classList.contains("hidden")?"読み取った文字":"文字を閉じる";
 };
 $("productForm").onsubmit=(e)=>{
-  e.preventDefault(); const p=formProduct(); if(!p.title)return;
+  e.preventDefault(); const p=formProduct();
+  if(!p.title && !p.imageData){ alert("タイトルか画像のどちらかだけ入れてください。"); return; }
+  if(!p.title) p.title="画像のみ登録";
   const i=state.products.findIndex(x=>x.id===p.id); if(i>=0)state.products[i]=p; else state.products.push(p);
   save(); $("productDialog").close(); render();
 };
@@ -281,3 +518,12 @@ $("importInput").onchange=async e=>{
 };
 
 load(); render();
+
+
+// v2 quick filters
+const qc=document.getElementById("quickConsidering");
+if(qc) qc.onclick=()=>{state.view="home";state.statusFilter="considering";render();};
+const qw=document.getElementById("quickWaiting");
+if(qw) qw.onclick=()=>{state.view="home";state.statusFilter="waiting";render();};
+const qm=document.getElementById("quickMoney");
+if(qm) qm.onclick=()=>{state.view="money";state.statusFilter=null;render();};
