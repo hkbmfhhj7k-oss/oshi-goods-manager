@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#f6f2ff" />
+  <title>推し活グッズ管理</title>
+  <link rel="manifest" href="manifest.json" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">MY OSHI GOODS</p>
+        <h1>推し活グッズ管理</h1>
+      </div>
+      <button class="icon-btn" id="settingsBtn" aria-label="設定">⚙️</button>
+    </header>
+
+    <main>
+      <section class="summary-grid">
+        <button class="summary-card" data-filter-status="considering">
+          <span>検討中</span><strong id="sumConsidering">0</strong><small>件</small>
+        </button>
+        <button class="summary-card" data-filter-status="waiting">
+          <span>発送待ち</span><strong id="sumWaiting">0</strong><small>件</small>
+        </button>
+        <button class="summary-card wide">
+          <span>今月の購入額</span><strong id="sumMonth">¥0</strong>
+          <small id="sumMonthSub">送料込み</small>
+        </button>
+      </section>
+
+      <section class="deadline-box">
+        <div class="section-title-row">
+          <h2>近日締切</h2>
+          <button class="text-btn" id="clearFilterBtn">すべて表示</button>
+        </div>
+        <div id="deadlineList" class="deadline-list"></div>
+      </section>
+
+      <section class="section-block">
+        <div class="section-title-row">
+          <h2>商品</h2>
+          <div class="segmented">
+            <button class="seg active" data-list-filter="all">すべて</button>
+            <button class="seg" data-list-filter="owned">所持</button>
+            <button class="seg" data-list-filter="random">ランダム</button>
+          </div>
+        </div>
+
+        <div class="search-row">
+          <input id="searchInput" type="search" placeholder="タイトル・シリーズ・ショップで検索" />
+          <select id="sortSelect" aria-label="並び順">
+            <option value="updated">更新順</option>
+            <option value="deadline">締切順</option>
+            <option value="priceHigh">価格高い順</option>
+            <option value="priceLow">価格安い順</option>
+          </select>
+        </div>
+
+        <div id="productList" class="product-list"></div>
+        <div id="emptyState" class="empty-state hidden">
+          <div class="empty-icon">🧸</div>
+          <h3>まだ商品がありません</h3>
+          <p>右下の＋から、気になる商品を登録できます。</p>
+        </div>
+      </section>
+    </main>
+
+    <button class="fab" id="addBtn" aria-label="商品を追加">＋</button>
+
+    <nav class="bottom-nav">
+      <button class="nav-item active" data-view="home">🏠<span>ホーム</span></button>
+      <button class="nav-item" data-view="owned">📦<span>所持品</span></button>
+      <button class="nav-item" data-view="money">💰<span>お金</span></button>
+      <button class="nav-item" data-view="transfers">🤝<span>譲渡</span></button>
+    </nav>
+  </div>
+
+  <dialog id="productDialog" class="sheet-dialog">
+    <form method="dialog" id="productForm">
+      <div class="sheet-header">
+        <button type="button" class="text-btn" id="closeProductDialog">閉じる</button>
+        <h2 id="formTitle">商品を追加</h2>
+        <button type="submit" class="primary-mini">保存</button>
+      </div>
+
+      <div class="sheet-content">
+        <input type="hidden" id="productId" />
+
+        <label class="image-picker">
+          <input id="imageInput" type="file" accept="image/*" />
+          <img id="imagePreview" alt="" class="hidden" />
+          <div id="imagePlaceholder"><span>📷</span><b>画像を追加</b></div>
+        </label>
+
+        <div class="field-grid two">
+          <label>シリーズ
+            <input id="series" placeholder="例：魔入りました！入間くん" />
+          </label>
+          <label>状態
+            <select id="status">
+              <option value="considering">検討中</option>
+              <option value="planned">予約予定</option>
+              <option value="ordered">購入済み</option>
+              <option value="waiting">発送待ち</option>
+              <option value="shipped">発送済み</option>
+              <option value="owned">所持済み</option>
+              <option value="skipped">見送り</option>
+            </select>
+          </label>
+        </div>
+
+        <label>タイトル
+          <input id="title" required placeholder="商品名" />
+        </label>
+
+        <div class="field-grid two">
+          <label>価格
+            <div class="money-input"><span>¥</span><input id="price" type="number" min="0" inputmode="numeric" /></div>
+          </label>
+          <label>送料
+            <div class="money-input"><span>¥</span><input id="shippingFee" type="number" min="0" inputmode="numeric" /></div>
+          </label>
+        </div>
+
+        <div class="chip-row">
+          <label class="toggle-chip"><input type="checkbox" id="isRandom" />ランダム商品</label>
+          <label class="toggle-chip"><input type="checkbox" id="hasBonus" />特典あり</label>
+        </div>
+
+        <details>
+          <summary>販売・発送情報</summary>
+          <div class="details-inner">
+            <div class="field-grid two">
+              <label>受注開始<input id="orderStart" type="date" /></label>
+              <label>受注終了<input id="orderEnd" type="date" /></label>
+            </div>
+            <div class="field-grid two">
+              <label>予約締切<input id="reserveDeadline" type="date" /></label>
+              <label>発売日<input id="releaseDate" type="date" /></label>
+            </div>
+            <label>発送予定（原文のままOK）
+              <input id="shippingText" placeholder="例：11月下旬より順次発送／2027年1月頃" />
+            </label>
+            <div class="field-grid two">
+              <label>発送予定開始<input id="shipStart" type="date" /></label>
+              <label>発送予定終了<input id="shipEnd" type="date" /></label>
+            </div>
+            <div class="field-grid two">
+              <label>ショップ<input id="shop" placeholder="アニメイト等" /></label>
+              <label>注文番号<input id="orderNumber" placeholder="任意" /></label>
+            </div>
+            <label>商品ページURL<input id="url" type="url" placeholder="https://..." /></label>
+            <div class="field-grid two">
+              <label>欲しい数<input id="wantedQty" type="number" min="0" value="1" /></label>
+              <label>購入数<input id="purchasedQty" type="number" min="0" value="0" /></label>
+            </div>
+          </div>
+        </details>
+
+        <details id="randomDetails" class="hidden">
+          <summary>ランダム商品情報</summary>
+          <div class="details-inner">
+            <div class="field-grid three">
+              <label>全種数<input id="variantCount" type="number" min="1" /></label>
+              <label>推し対象数<input id="favCount" type="number" min="0" /></label>
+              <label>単品上限<input id="purchaseLimit" type="number" min="0" /></label>
+            </div>
+            <div class="field-grid two">
+              <label>BOX価格<div class="money-input"><span>¥</span><input id="boxPrice" type="number" min="0" /></div></label>
+              <label>BOX封入数<input id="boxCount" type="number" min="0" /></label>
+            </div>
+            <label>排出方式
+              <select id="randomMode">
+                <option value="unknown">不明</option>
+                <option value="independent">完全ランダム</option>
+                <option value="noDuplicate">BOX内重複なし</option>
+                <option value="complete">BOXコンプ保証</option>
+                <option value="custom">特殊封入</option>
+              </select>
+            </label>
+            <div id="probabilityBox" class="probability-box">条件を入力すると確率を表示します。</div>
+            <div class="subhead-row"><h3>絵柄・所持状況</h3><button type="button" class="text-btn" id="addVariantBtn">＋絵柄</button></div>
+            <div id="variantEditor"></div>
+          </div>
+        </details>
+
+        <details id="bonusDetails" class="hidden">
+          <summary>特典</summary>
+          <div class="details-inner">
+            <div class="subhead-row"><h3>特典一覧</h3><button type="button" class="text-btn" id="addBonusBtn">＋特典</button></div>
+            <div id="bonusEditor"></div>
+          </div>
+        </details>
+
+        <details>
+          <summary>メモ</summary>
+          <div class="details-inner">
+            <textarea id="notes" rows="4" placeholder="交換条件・店舗別メモなど"></textarea>
+          </div>
+        </details>
+
+        <button type="button" id="deleteBtn" class="danger-btn hidden">この商品を削除</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="detailDialog" class="sheet-dialog detail-sheet">
+    <div class="sheet-header">
+      <button type="button" class="text-btn" id="closeDetailDialog">閉じる</button>
+      <h2>商品詳細</h2>
+      <button type="button" class="primary-mini" id="editFromDetail">編集</button>
+    </div>
+    <div id="detailContent" class="sheet-content"></div>
+  </dialog>
+
+  <dialog id="settingsDialog" class="sheet-dialog">
+    <div class="sheet-header">
+      <button type="button" class="text-btn" id="closeSettingsDialog">閉じる</button>
+      <h2>設定・データ</h2><span></span>
+    </div>
+    <div class="sheet-content">
+      <section class="settings-section">
+        <h3>バックアップ</h3>
+        <p>データはこの端末のブラウザ内に保存されます。端末変更前などにJSONを書き出してください。</p>
+        <div class="button-stack">
+          <button id="exportBtn" class="secondary-btn">データを書き出す</button>
+          <label class="secondary-btn file-btn">データを読み込む<input id="importInput" type="file" accept="application/json" /></label>
+        </div>
+      </section>
+    </div>
+  </dialog>
+
+  <template id="variantTemplate">
+    <div class="mini-card variant-row">
+      <div class="mini-card-top">
+        <input class="v-name" placeholder="絵柄名 / キャラ名" />
+        <button type="button" class="remove-mini">×</button>
+      </div>
+      <div class="mini-grid">
+        <label>欲しい<input class="v-wanted" type="number" min="0" value="0" /></label>
+        <label>所持<input class="v-owned" type="number" min="0" value="0" /></label>
+        <label>交換用<input class="v-trade" type="number" min="0" value="0" /></label>
+        <label>譲渡予定<input class="v-transfer" type="number" min="0" value="0" /></label>
+      </div>
+      <input class="v-transferTo" placeholder="譲渡先メモ（先輩、交換相手Aなど）" />
+    </div>
+  </template>
+
+  <template id="bonusTemplate">
+    <div class="mini-card bonus-row">
+      <div class="mini-card-top">
+        <input class="b-name" placeholder="特典名" />
+        <button type="button" class="remove-mini">×</button>
+      </div>
+      <input class="b-condition" placeholder="入手条件 / 対象店舗" />
+      <div class="mini-grid">
+        <label>欲しい<input class="b-wanted" type="number" min="0" value="0" /></label>
+        <label>所持<input class="b-owned" type="number" min="0" value="0" /></label>
+        <label>交換用<input class="b-trade" type="number" min="0" value="0" /></label>
+        <label>譲渡予定<input class="b-transfer" type="number" min="0" value="0" /></label>
+      </div>
+      <input class="b-transferTo" placeholder="譲渡先メモ" />
+    </div>
+  </template>
+
+  <script src="app.js"></script>
+</body>
+</html>

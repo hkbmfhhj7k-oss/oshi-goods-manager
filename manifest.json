@@ -1,0 +1,9 @@
+{
+  "name": "推し活グッズ管理",
+  "short_name": "推し活管理",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f7f4fb",
+  "theme_color": "#f6f2ff",
+  "icons": []
+}
