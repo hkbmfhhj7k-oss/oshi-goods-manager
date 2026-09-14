@@ -95,36 +95,17 @@
         <input type="hidden" id="productId" />
 
         <section class="scan-card">
-          <div class="scan-head">
-            <div>
-              <span class="scan-kicker">PHOTO → AUTO FILL</span>
-              <h3>まず画像を入れるだけ</h3>
-              <p>スクショや告知画像から、読める項目を自動で埋めます。</p>
-            </div>
-            <span class="scan-spark">✦</span>
-          </div>
-
-          <label class="image-picker">
-            <input id="imageInput" type="file" accept="image/*" />
-            <img id="imagePreview" alt="" class="hidden" />
-            <div id="imagePlaceholder"><span>📷</span><b>画像・スクショを選ぶ</b><small>選ぶと自動で文字を読み取ります</small></div>
-          </label>
-
-          <div id="ocrPanel" class="ocr-panel hidden">
-            <div class="ocr-status-row">
-              <span id="ocrStatus">待機中</span>
-              <strong id="ocrPercent"></strong>
-            </div>
-            <div class="ocr-progress"><i id="ocrProgressBar"></i></div>
-            <div id="ocrResultSummary" class="ocr-result-summary"></div>
-            <div class="ocr-actions">
-              <button type="button" class="secondary-mini" id="rerunOcrBtn">もう一度読み取る</button>
-              <button type="button" class="secondary-mini" id="showOcrTextBtn">読み取った文字</button>
-            </div>
-            <textarea id="ocrRawText" class="ocr-raw hidden" rows="8" readonly></textarea>
+          <div class="scan-head"><div><span class="scan-kicker">SCREENSHOT → AUTO FILL</span><h3>スクショを入れたら、ほぼおまかせ</h3><p>商品ページ全体を読み取り、商品情報とメイン画像を分けます。</p></div><span class="scan-spark">✦</span></div>
+          <label class="image-picker"><input id="imageInput" type="file" accept="image/*" /><img id="imagePreview" alt="" class="hidden" /><div id="imagePlaceholder"><span>📷</span><b>商品ページのスクショを選ぶ</b><small>フルページスクショでもOK</small></div></label>
+          <div id="aiPanel" class="ocr-panel hidden">
+            <div class="ocr-status-row"><span id="aiStatus">待機中</span><strong id="aiStateIcon"></strong></div>
+            <div class="ocr-progress"><i id="aiProgressBar"></i></div>
+            <div id="aiResultSummary" class="ocr-result-summary"></div>
+            <div id="aiCandidate" class="ai-candidate hidden"><div class="candidate-title">画像から見つけました</div><div id="aiCandidateList" class="candidate-list"></div></div>
+            <div class="ocr-actions"><button type="button" class="secondary-mini" id="rerunAiBtn">もう一度読む</button><button type="button" class="secondary-mini hidden" id="toggleSourceBtn">元スクショを見る</button></div>
+            <div class="privacy-note">選んだ画像は商品情報解析のため Cloudflare Workers AI に送信されます。注文履歴・住所・氏名・決済情報が写った画像は使わないでください。</div>
           </div>
         </section>
-
         <div class="field-grid two">
           <label>シリーズ
             <input id="series" placeholder="例：魔入りました！入間くん" />
@@ -295,8 +276,6 @@
       <input class="b-transferTo" placeholder="譲渡先メモ" />
     </div>
   </template>
-
-  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
